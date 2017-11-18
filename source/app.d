@@ -11,8 +11,12 @@ private:
 	this.t = Type.BOOLEAN;
     }
     this(long v) {
-	this.innerValue.longv = v;
-	this.t = Type.LONG;
+	this.innerValue.numberv = v;
+	this.t = Type.NUMBER;
+    }
+    this(double v) {
+	this.innerValue.floatingv = v;
+	this.t = Type.FLOATING;
     }
     this(JSON[string] v) {
 	this.innerValue.objv = v;
@@ -22,6 +26,7 @@ private:
 	JSON(true);
 	JSON(false);
 	JSON(1);
+	JSON(1.1);
 	assert(JSON(null).type == Type.OBJ); // assoc
     }
 public:
@@ -29,19 +34,25 @@ public:
     bool boolean() {
 	return this.innerValue.boolv;
     }
+    long number() {
+	return this.innerValue.numberv;
+    }
+    double floating() {
+	return this.innerValue.floatingv;
+    }
     union InnerValue {
-	long longv;
+	long numberv;
 	string strv;
 	bool boolv;
-	double doublev;
+	double floatingv;
 	JSON[] arrayv;
 	JSON[string] objv;
     }
     enum Type {
-	LONG,
+	NUMBER,
 	STR,
 	BOOLEAN,
-	DOUBLE,
+	FLOATING,
 	ARRAY,
 	OBJ
     }
@@ -65,19 +76,30 @@ public:
 	}
     }
 
+    ExpectObj expect(bool delegate(char) pred) {
+	import std.conv : to;
+
+	if (this.p < str.length && pred(str[this.p])) {
+	    return new ExpectObj(str[this.p].to!string);
+	}
+	return null;
+    }
+
     ExpectObj expect(string s) {
-	import std.algorithm : max;
-	auto e = max(this.p+s.length, this.str.length-1);
+	import std.algorithm : min;
+	auto e = min(this.p+s.length, this.str.length);
 	if (s == str[p..e]) {
 	    return new ExpectObj(s);
 	}
 	return null;
     }
-    void read(ExpectObj o) {
+    string read(ExpectObj o) {
 	if (o is null) {
-	    return; 
+	    return null;  
 	}
-	return;
+	int pre = this.p;
+	this.p += o.s.length;
+	return this.str[pre..this.p];
     }
 }
 
@@ -114,6 +136,87 @@ unittest {
 	JSON boolObj;
 	assert(tryParseBool(new ParseInfo("faust"), boolObj) == false);
 	assert(boolObj.type == JSON.Type.OBJ);
+    }
+}
+
+bool tryParseNumber(ParseInfo pinfo, ref JSON numberObj) {
+    import std.conv : to;
+
+    bool isNegative = false;
+    if (auto ex = pinfo.expect("-")) {
+	pinfo.read(ex);
+	isNegative = true;
+    }
+
+    if (auto ex = pinfo.expect("0.")) {
+	return false;
+    }
+
+    if (auto ex = pinfo.expect("0e")) {
+	return false;
+    }
+
+    if (auto ex = pinfo.expect(x => '1' <= x && x <= '9')) {
+	char[] s = [];
+	while (true) {
+	    auto ex2 = pinfo.expect(x => '0' <= x && x <= '9');
+	    if (ex2 is null) { break; }
+	    s ~= pinfo.read(ex2);
+	}
+
+	// float
+	if (auto dot = pinfo.expect(".")) {
+	    pinfo.read(dot);
+	    char[] s2 = [];
+	    while (true) {
+		auto ex2 = pinfo.expect(x => '0' <= x && x <= '9');
+		if (ex2 is null) { break; }
+		s2 ~= pinfo.read(ex2);
+	    }
+	    double v = to!double(s~"."~s2);
+	    if (isNegative) { v = -v; }
+	    numberObj = JSON(v);
+	    return true;
+	}
+	// int
+	else {
+	    long v = to!long(s);
+	    if (isNegative) { v = -v; }
+	    numberObj = JSON(v);
+	    return true;
+	}
+    }
+    return false;
+}
+
+unittest {
+    {
+	JSON numberObj;
+	assert(tryParseNumber(new ParseInfo("112"), numberObj) == true);
+	assert(numberObj.type == JSON.Type.NUMBER);
+	assert(numberObj.number == 112);
+    }
+    {
+	JSON numberObj;
+	assert(tryParseNumber(new ParseInfo("-112"), numberObj) == true);
+	assert(numberObj.type == JSON.Type.NUMBER);
+	assert(numberObj.number == -112);
+    }
+    {
+	JSON numberObj;
+	assert(tryParseNumber(new ParseInfo("123.4"), numberObj) == true);
+	assert(numberObj.type == JSON.Type.FLOATING);
+	assert(numberObj.floating == 123.4);
+    }
+    {
+	JSON numberObj;
+	assert(tryParseNumber(new ParseInfo("-123.4"), numberObj) == true);
+	assert(numberObj.type == JSON.Type.FLOATING);
+	assert(numberObj.floating == -123.4);
+    }
+    {
+	JSON numberObj;
+	assert(tryParseNumber(new ParseInfo("-"), numberObj) == false);
     }
 }
 
