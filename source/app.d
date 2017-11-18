@@ -28,6 +28,10 @@ public:
 	this.innerValue.boolv = v;
 	this.t = Type.BOOLEAN;
     }
+    this(int v) {
+	this.innerValue.numberv = v;
+	this.t = Type.NUMBER;
+    }
     this(long v) {
 	this.innerValue.numberv = v;
 	this.t = Type.NUMBER;
@@ -49,12 +53,12 @@ public:
 	this.t = Type.OBJ;
     }
     unittest {
-	JSON(true);
-	JSON(false);
-	JSON(1);
-	JSON(1.1);
-	JSON("hello");
-	JSON([JSON(true), JSON(1)]);
+	assert(JSON(true).type == Type.BOOLEAN);
+	assert(JSON(false).type == Type.BOOLEAN);
+	assert(JSON(1).type == Type.NUMBER);
+	assert(JSON(1.1).type == Type.FLOATING);
+	assert(JSON("hello").type == Type.STR);
+	assert(JSON([JSON(true), JSON(1)]).type == Type.ARRAY);
     }
 
     bool opEquals(const JSON json) const {
@@ -96,6 +100,7 @@ public:
 	assert(JSON(1) == JSON(1));
 	assert([JSON(1)] == [JSON(1)]);
 	assert(JSON([JSON(1)]) == JSON([JSON(1)]));
+	assert(JSON(true) == JSON(true));
     }
 
     Type type() const { return this.t; }
@@ -113,6 +118,9 @@ public:
     }
     JSON[] array() const {
 	return this.innerValue.arrayv.dup;
+    }
+    JSON[string] obj() {
+	return this.innerValue.objv;
     }
 }
 
@@ -412,6 +420,7 @@ unittest {
 	assert(tryParseArray(new ParseInfo("[1]"), arrObj) == true);
 	assert(arrObj.type == JSON.Type.ARRAY);
 	assert(arrObj.array[0].number == 1);
+	assert(arrObj == JSON([JSON(1)]));
     }
     {
 	JSON arrObj;
@@ -426,11 +435,84 @@ unittest {
     }
 }
 
-bool tryParseJSON(ParseInfo pinfo, ref JSON jsonObj) {
-    if (pinfo.p >= pinfo.str.length) {
-	return false;
+bool tryParseObj(ParseInfo pinfo, ref JSON objObj) {
+    auto p = pinfo.p;
+
+    if (auto ex = pinfo.expect("{")) {
+	pinfo.read(ex);
+
+	JSON[string] obj;
+	if (auto ex2 = pinfo.expect("}")) {
+	    pinfo.read(ex2);
+	    objObj = JSON(obj);
+	    return true;
+	}
+	while (true) {
+	    JSON name;
+	    if (! tryParseStr(pinfo, name)) {
+		pinfo.p = p;
+		return false;
+	    }
+
+	    auto colon = pinfo.expect(":");
+	    if (colon is null) {
+		pinfo.p = p;
+		return false;
+	    }
+	    pinfo.read(colon);
+
+	    JSON jsonObj;
+	    if (! tryParseJSON(pinfo, jsonObj)) {
+		pinfo.p = p;
+		return false;
+	    }
+
+	    obj[name.str] = jsonObj;
+	    auto ex2 = pinfo.expect(",");
+	    if (ex2 is null) {
+		auto ex3 = pinfo.expect("}");
+		if (ex3 is null) {
+		    pinfo.p = p;
+		    return false;
+		}
+		pinfo.read(ex3);
+		break;
+	    }
+	    pinfo.read(ex2);
+	}
+	objObj = JSON(obj);
+	return true;
     }
 
+    pinfo.p = p;
+    return false;
+}
+
+unittest {
+    {
+	JSON objObj;
+	assert(tryParseObj(new ParseInfo("{}"), objObj)== true);
+	assert(objObj.type == JSON.Type.OBJ);
+	assert(objObj.obj.length == 0);
+    }
+    {
+	JSON objObj;
+	assert(tryParseObj(new ParseInfo("{\"key\":true}"), objObj)== true);
+	assert(objObj.type == JSON.Type.OBJ);
+	assert(objObj.obj.length == 1);
+	assert(objObj.obj["key"] == JSON(true));
+    }
+    {
+	JSON objObj;
+	assert(tryParseObj(new ParseInfo("{\"key\": {\"key\": \"value\"}, \"key2\": 1}"), objObj)== true);
+	assert(objObj.type == JSON.Type.OBJ);
+	assert(objObj.obj.length == 2);
+	assert(objObj.obj["key"].obj["key"] == JSON("value"));
+	assert(objObj.obj["key2"] == JSON(1));
+    }
+}
+
+bool tryParseJSON(ParseInfo pinfo, ref JSON jsonObj) {
     if (tryParseBool(pinfo, jsonObj)) {
 	return true;
     }
@@ -443,7 +525,9 @@ bool tryParseJSON(ParseInfo pinfo, ref JSON jsonObj) {
     if (tryParseArray(pinfo, jsonObj)) {
 	return true;
     }
-
+    if (tryParseObj(pinfo, jsonObj)) {
+	return true;
+    }
 
     // parse for obj
     return false;
@@ -471,7 +555,3 @@ unittest {
 }
 
 
-void main()
-{
-	writeln("Edit source/app.d to start your project.");
-}
