@@ -1,5 +1,4 @@
-import std.stdio;
-
+module jparse;
 
 struct JSON {
 private:
