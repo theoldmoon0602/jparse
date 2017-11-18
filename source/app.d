@@ -61,7 +61,8 @@ public:
 	assert(JSON([JSON(true), JSON(1)]).type == Type.ARRAY);
     }
 
-    bool opEquals(const JSON json) const {
+    //TODO: make me const
+    bool opEquals(JSON json) {
 	if (this.type != json.type) {
 	    return false;
 	}
@@ -75,25 +76,22 @@ public:
 	case Type.STR:
 	    return this.str == json.str;
 	case Type.ARRAY:
-	    if (this.array.length != json.array.length) {
+	    import std.range:zip;
+	    import std.algorithm:all;
+	    return this.array.length == json.array.length &&
+		all!"a[0] == a[1]"(zip(this.array, json.array));
+	case Type.OBJ:
+	    if (this.obj.length != json.obj.length) {
 		return false;
 	    }
 	    bool all = true;
-	    foreach (i; 0..this.array.length) {
-		if (this.array[i] != json.array[i]) {
+	    foreach (k,v; this.obj) {
+		if (k !in json.obj || v != json.obj[k]) {
 		    all = false;
 		    break;
 		}
 	    }
 	    return all;
-	    /*
-	    import std.range:zip;
-	    import std.algorithm:all;
-	    return this.array.length == json.array.length &&
-		all!"a[0] == a[1]"(zip(this.array, json.array));
-	    */
-	case Type.OBJ:
-	    return false;
 	}
     }
     unittest {
@@ -139,7 +137,8 @@ public:
     }
 
     uint ignoreSpace() {
-	return ignorePred(x => x == ' ' || x == '\t');
+	import std.algorithm:canFind;
+	return ignorePred(x => [' ', '\t', '\n', '\r'].canFind(x));
     }
 
     uint ignorePred(bool delegate(char) pred) {
@@ -500,7 +499,7 @@ unittest {
 	assert(tryParseObj(new ParseInfo("{\"key\":true}"), objObj)== true);
 	assert(objObj.type == JSON.Type.OBJ);
 	assert(objObj.obj.length == 1);
-	assert(objObj.obj["key"] == JSON(true));
+	assert(objObj == JSON(["key": JSON(true)]));
     }
     {
 	JSON objObj;
@@ -551,6 +550,41 @@ unittest {
 	assert(tryParseJSON("false", json) == true); 
 	assert(json.type == JSON.Type.BOOLEAN);
 	assert(json.boolean == false);
+    }
+    {
+	JSON json;
+	string jsonStr = `
+	{
+	    "key": "value",
+	    "key": "override",
+	    "key2": [ "array", "values", 1],
+	    "numkey": 1,
+	    "negkey": -1,
+	    "floatkey": 1.1,
+	    "negfloat": -1.2,
+	    "boolean": [ true, false],
+	    "objinobj": {
+		"empty": {},
+		"emptryarr": []
+	    }
+	}
+	`;
+	assert(tryParseJSON(jsonStr, json) == true); 
+	assert(json.type == JSON.Type.OBJ);
+	assert(json == JSON([
+	    "key": JSON("override"),
+	    "key2": JSON([JSON("array"), JSON("values"), JSON(1)]),
+	    "numkey": JSON(1),
+	    "negkey": JSON(-1),
+	    "floatkey": JSON(1.1),
+	    "negfloat": JSON(-1.2),
+	    "boolean": JSON([JSON(true), JSON(false)]),
+	    "objinobj": JSON([
+		"empty": JSON(),
+		"emptryarr": JSON(cast(JSON[])[]),
+	    ])
+
+	]));
     }
 }
 
